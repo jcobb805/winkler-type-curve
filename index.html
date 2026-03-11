@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Basin Clear Fork — ORRI Valuation Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Arial, sans-serif; background: #0d1117; color: #e6edf3; display: flex; height: 100vh; overflow: hidden; }
+
+  /* Sidebar */
+  #sidebar { width: 420px; min-width: 420px; background: #161b22; border-right: 1px solid #30363d; display: flex; flex-direction: column; overflow-y: auto; }
+  #sidebar h1 { font-size: 16px; padding: 14px 16px 6px; color: #f0f6fc; }
+  #sidebar h2 { font-size: 13px; padding: 12px 16px 6px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; }
+  .subtitle { font-size: 12px; color: #8b949e; padding: 0 16px 10px; }
+
+  /* Input panels */
+  .panel { background: #1c2129; margin: 6px 12px; border-radius: 8px; padding: 12px 14px; border: 1px solid #30363d; }
+  .panel label { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #c9d1d9; margin-bottom: 6px; }
+  .panel label span.val { font-weight: bold; color: #58a6ff; min-width: 70px; text-align: right; }
+  .panel input[type=range] { width: 100%; accent-color: #58a6ff; cursor: pointer; }
+  .panel select { background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; padding: 4px 8px; font-size: 12px; width: 100%; }
+
+  /* Results */
+  .result-box { background: #1c2129; margin: 6px 12px; border-radius: 8px; padding: 14px; border: 1px solid #238636; }
+  .result-box .title { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .result-row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; }
+  .result-row .label { color: #c9d1d9; }
+  .result-row .value { font-weight: bold; color: #3fb950; }
+  .result-row .value.blue { color: #58a6ff; }
+  .result-row .value.orange { color: #d29922; }
+
+  /* Chart container */
+  .chart-box { margin: 6px 12px; background: #1c2129; border-radius: 8px; padding: 10px; border: 1px solid #30363d; height: 200px; }
+  .chart-box canvas { width: 100% !important; height: 100% !important; }
+
+  /* Schedule table */
+  .sched-table { width: 100%; font-size: 11px; border-collapse: collapse; margin-top: 6px; }
+  .sched-table th { background: #21262d; color: #8b949e; padding: 4px 6px; text-align: center; font-weight: 600; }
+  .sched-table td { padding: 3px 6px; text-align: center; border-bottom: 1px solid #21262d; color: #c9d1d9; }
+  .sched-table tr:hover td { background: #1c2129; }
+
+  /* Map */
+  #map-container { flex: 1; position: relative; }
+  #map { width: 100%; height: 100%; }
+  .leaflet-popup-content-wrapper { background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 8px; }
+  .leaflet-popup-tip { background: #161b22; }
+  .leaflet-popup-content { font-size: 12px; line-height: 1.5; }
+  .leaflet-popup-content b { color: #58a6ff; }
+
+  /* Map legend */
+  .legend { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; color: #c9d1d9; font-size: 12px; line-height: 1.8; }
+  .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+
+  /* Toggle */
+  .toggle-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; }
+  .toggle-row input[type=checkbox] { accent-color: #58a6ff; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1>Basin Oil & Gas — Clear Fork ORRI Model</h1>
+  <div class="subtitle">Winkler County, TX | 71 Analog Wells | Enverus Data</div>
+
+  <h2>Development Assumptions</h2>
+  <div class="panel">
+    <label>Total Wells <span class="val" id="v-wells">60</span></label>
+    <input type="range" id="s-wells" min="10" max="100" value="60" step="5">
+
+    <label>Wells/Year (Yr 2+) <span class="val" id="v-wpy">13</span></label>
+    <input type="range" id="s-wpy" min="5" max="25" value="13" step="1">
+
+    <label>Year 1 Commitment <span class="val" id="v-yr1">10</span></label>
+    <input type="range" id="s-yr1" min="5" max="20" value="10" step="1">
+
+    <label>D&C Cost per Well <span class="val" id="v-dc">$1,725,000</span></label>
+    <input type="range" id="s-dc" min="1000000" max="2500000" value="1725000" step="25000">
+  </div>
+
+  <h2>Pricing</h2>
+  <div class="panel">
+    <label>WTI Oil Price ($/BBL) <span class="val" id="v-wti">$65.00</span></label>
+    <input type="range" id="s-wti" min="40" max="100" value="65" step="1">
+
+    <label>Gas Price ($/MCF) <span class="val" id="v-gas">$3.50</span></label>
+    <input type="range" id="s-gas" min="1" max="8" value="3.5" step="0.25">
+
+    <label>Discount Rate <span class="val" id="v-disc">10%</span></label>
+    <input type="range" id="s-disc" min="5" max="20" value="10" step="1">
+  </div>
+
+  <h2>ORRI Terms</h2>
+  <div class="panel">
+    <label>ORRI % <span class="val" id="v-orri" style="color:#3fb950;font-size:15px;">2.500%</span></label>
+    <input type="range" id="s-orri" min="0.5" max="5" value="2.5" step="0.125">
+  </div>
+
+  <div class="result-box" id="results">
+    <div class="title">ORRI Valuation (10-Year)</div>
+    <div class="result-row"><span class="label">Undiscounted Value</span><span class="value" id="r-undisc">$0</span></div>
+    <div class="result-row"><span class="label">PV-10 Value</span><span class="value" id="r-pv10">$0</span></div>
+    <div class="result-row"><span class="label">Avg Annual ORRI</span><span class="value blue" id="r-annual">$0</span></div>
+    <div class="result-row"><span class="label">Total Oil (60 wells)</span><span class="value orange" id="r-oil">0 BBL</span></div>
+    <div class="result-row"><span class="label">Total Operator CapEx</span><span class="value orange" id="r-capex">$0</span></div>
+  </div>
+
+  <h2>Type Curve & Annual ORRI</h2>
+  <div class="chart-box"><canvas id="chart-tc"></canvas></div>
+  <div class="chart-box"><canvas id="chart-cf"></canvas></div>
+
+  <h2>Development Schedule</h2>
+  <div class="panel" style="padding:6px 8px;">
+    <table class="sched-table">
+      <thead><tr><th>Year</th><th>New</th><th>Cum</th><th>Oil (BBL)</th><th>ORRI</th><th>PV ORRI</th></tr></thead>
+      <tbody id="sched-body"></tbody>
+    </table>
+  </div>
+
+  <h2>Map Layers</h2>
+  <div class="panel">
+    <div class="toggle-row"><input type="checkbox" id="t-wells" checked> Basin Clear Fork Wells (71)</div>
+    <div class="toggle-row"><input type="checkbox" id="t-aoi" checked> AOI / Position (gray)</div>
+    <div class="toggle-row"><input type="checkbox" id="t-planned" checked> Planned Well Locations</div>
+  </div>
+
+  <div style="padding:12px 16px;font-size:10px;color:#484f58;">
+    Data: Enverus Direct Access API | Platform Energy &copy; 2026
+  </div>
+</div>
+
+<div id="map-container">
+  <div id="map"></div>
+</div>
+
+<script>
+// =============================================
+// TYPE CURVE DATA (from Enverus)
+// =============================================
+const DECLINE = {"qi":2066.2,"b":1.25,"Di":0.055};
+
+const TYPE_CURVE = [{"month":0,"avgOilBBL":2066.2,"avgGasMCF":10566.1,"avgWaterBBL":1717.3,"wellCount":71},{"month":1,"avgOilBBL":2289.8,"avgGasMCF":11940.4,"avgWaterBBL":1932.4,"wellCount":71},{"month":2,"avgOilBBL":2151.2,"avgGasMCF":11976.3,"avgWaterBBL":1664.2,"wellCount":71},{"month":3,"avgOilBBL":1982.5,"avgGasMCF":10998.1,"avgWaterBBL":1623.4,"wellCount":71},{"month":4,"avgOilBBL":1895.6,"avgGasMCF":10378.4,"avgWaterBBL":1394.2,"wellCount":71},{"month":5,"avgOilBBL":1791,"avgGasMCF":9337.4,"avgWaterBBL":1553.9,"wellCount":71},{"month":6,"avgOilBBL":1609.3,"avgGasMCF":9224.7,"avgWaterBBL":1432.5,"wellCount":71},{"month":7,"avgOilBBL":1542.4,"avgGasMCF":8488.8,"avgWaterBBL":1361.2,"wellCount":71},{"month":8,"avgOilBBL":1420.4,"avgGasMCF":7933.7,"avgWaterBBL":1328.3,"wellCount":71},{"month":9,"avgOilBBL":1395.4,"avgGasMCF":7397,"avgWaterBBL":1473.8,"wellCount":70},{"month":10,"avgOilBBL":1308,"avgGasMCF":6626.3,"avgWaterBBL":1363.8,"wellCount":70},{"month":11,"avgOilBBL":1342.3,"avgGasMCF":6102.1,"avgWaterBBL":1318.6,"wellCount":70},{"month":12,"avgOilBBL":1283.5,"avgGasMCF":5727.1,"avgWaterBBL":1320.5,"wellCount":70},{"month":13,"avgOilBBL":1204.2,"avgGasMCF":5217.6,"avgWaterBBL":1341.3,"wellCount":70},{"month":14,"avgOilBBL":1192.3,"avgGasMCF":5175.8,"avgWaterBBL":1423.1,"wellCount":70},{"month":15,"avgOilBBL":1132.5,"avgGasMCF":4915.4,"avgWaterBBL":1392.2,"wellCount":70},{"month":16,"avgOilBBL":1146.8,"avgGasMCF":4747.6,"avgWaterBBL":1220.7,"wellCount":70},{"month":17,"avgOilBBL":1122,"avgGasMCF":4529.8,"avgWaterBBL":1316.4,"wellCount":70},{"month":18,"avgOilBBL":1047.1,"avgGasMCF":4423,"avgWaterBBL":1247.3,"wellCount":70},{"month":19,"avgOilBBL":1015.5,"avgGasMCF":4309,"avgWaterBBL":1167.1,"wellCount":70},{"month":20,"avgOilBBL":1024.7,"avgGasMCF":3987.8,"avgWaterBBL":1193.8,"wellCount":70},{"month":21,"avgOilBBL":1022,"avgGasMCF":3861.2,"avgWaterBBL":1196,"wellCount":70},{"month":22,"avgOilBBL":1005,"avgGasMCF":3669.6,"avgWaterBBL":1165.2,"wellCount":70},{"month":23,"avgOilBBL":991.4,"avgGasMCF":3608.9,"avgWaterBBL":1085.1,"wellCount":70},{"month":24,"avgOilBBL":980.5,"avgGasMCF":3297.8,"avgWaterBBL":1174.1,"wellCount":70},{"month":25,"avgOilBBL":937,"avgGasMCF":3163,"avgWaterBBL":1384.5,"wellCount":70},{"month":26,"avgOilBBL":962.3,"avgGasMCF":3178.5,"avgWaterBBL":1204,"wellCount":70},{"month":27,"avgOilBBL":928.5,"avgGasMCF":2978.6,"avgWaterBBL":1275.9,"wellCount":70},{"month":28,"avgOilBBL":933.4,"avgGasMCF":2836.7,"avgWaterBBL":1296.8,"wellCount":70},{"month":29,"avgOilBBL":867.1,"avgGasMCF":2877.1,"avgWaterBBL":1289.2,"wellCount":70},{"month":30,"avgOilBBL":792.8,"avgGasMCF":2940.7,"avgWaterBBL":1221.4,"wellCount":70},{"month":31,"avgOilBBL":723.2,"avgGasMCF":2730.4,"avgWaterBBL":1271.4,"wellCount":70},{"month":32,"avgOilBBL":647.8,"avgGasMCF":2716.8,"avgWaterBBL":1154.9,"wellCount":70},{"month":33,"avgOilBBL":653.6,"avgGasMCF":2688.9,"avgWaterBBL":976.5,"wellCount":70},{"month":34,"avgOilBBL":661.9,"avgGasMCF":2451.8,"avgWaterBBL":954.1,"wellCount":70},{"month":35,"avgOilBBL":655.8,"avgGasMCF":2613.7,"avgWaterBBL":1024.1,"wellCount":70},{"month":36,"avgOilBBL":656.8,"avgGasMCF":2459.3,"avgWaterBBL":934.8,"wellCount":70},{"month":37,"avgOilBBL":637.6,"avgGasMCF":2410.5,"avgWaterBBL":889.1,"wellCount":70},{"month":38,"avgOilBBL":677.5,"avgGasMCF":2474.3,"avgWaterBBL":859.1,"wellCount":70},{"month":39,"avgOilBBL":696.9,"avgGasMCF":2402.5,"avgWaterBBL":891.6,"wellCount":70},{"month":40,"avgOilBBL":688,"avgGasMCF":2478.8,"avgWaterBBL":817.4,"wellCount":70},{"month":41,"avgOilBBL":597.6,"avgGasMCF":2262,"avgWaterBBL":808.7,"wellCount":70},{"month":42,"avgOilBBL":596,"avgGasMCF":2507.4,"avgWaterBBL":886.5,"wellCount":70},{"month":43,"avgOilBBL":588.5,"avgGasMCF":2453.5,"avgWaterBBL":903.3,"wellCount":70},{"month":44,"avgOilBBL":588.2,"avgGasMCF":2314.5,"avgWaterBBL":860.9,"wellCount":70},{"month":45,"avgOilBBL":614.9,"avgGasMCF":2380.3,"avgWaterBBL":917,"wellCount":70},{"month":46,"avgOilBBL":605.3,"avgGasMCF":2155.8,"avgWaterBBL":903.1,"wellCount":70},{"month":47,"avgOilBBL":650.8,"avgGasMCF":2194,"avgWaterBBL":941,"wellCount":70},{"month":48,"avgOilBBL":552.1,"avgGasMCF":2310.3,"avgWaterBBL":753.2,"wellCount":67},{"month":49,"avgOilBBL":562.2,"avgGasMCF":2027.7,"avgWaterBBL":696.6,"wellCount":67},{"month":50,"avgOilBBL":550,"avgGasMCF":2085.4,"avgWaterBBL":663.6,"wellCount":67},{"month":51,"avgOilBBL":525.8,"avgGasMCF":2153.9,"avgWaterBBL":622.4,"wellCount":67},{"month":52,"avgOilBBL":721.5,"avgGasMCF":2177.3,"avgWaterBBL":609.7,"wellCount":67},{"month":53,"avgOilBBL":539,"avgGasMCF":2322.1,"avgWaterBBL":577.6,"wellCount":67},{"month":54,"avgOilBBL":531.7,"avgGasMCF":2241.3,"avgWaterBBL":608.4,"wellCount":67},{"month":55,"avgOilBBL":571.6,"avgGasMCF":2360.6,"avgWaterBBL":622,"wellCount":67},{"month":56,"avgOilBBL":539,"avgGasMCF":2229.9,"avgWaterBBL":608.1,"wellCount":67},{"month":57,"avgOilBBL":530.3,"avgGasMCF":2116.2,"avgWaterBBL":619.2,"wellCount":67},{"month":58,"avgOilBBL":506.6,"avgGasMCF":1880.8,"avgWaterBBL":618.6,"wellCount":67},{"month":59,"avgOilBBL":559.7,"avgGasMCF":1849.5,"avgWaterBBL":846.9,"wellCount":67},{"month":60,"avgOilBBL":552.9,"avgGasMCF":1801,"avgWaterBBL":1052.4,"wellCount":67},{"month":61,"avgOilBBL":536.6,"avgGasMCF":1711.9,"avgWaterBBL":944.7,"wellCount":67},{"month":62,"avgOilBBL":510,"avgGasMCF":1735.1,"avgWaterBBL":897.5,"wellCount":67},{"month":63,"avgOilBBL":457.5,"avgGasMCF":1790.7,"avgWaterBBL":826.4,"wellCount":67},{"month":64,"avgOilBBL":472.7,"avgGasMCF":1821.7,"avgWaterBBL":717,"wellCount":67},{"month":65,"avgOilBBL":485.7,"avgGasMCF":1756,"avgWaterBBL":668.1,"wellCount":67},{"month":66,"avgOilBBL":455.1,"avgGasMCF":1524.1,"avgWaterBBL":637.2,"wellCount":67},{"month":67,"avgOilBBL":506.6,"avgGasMCF":1568.4,"avgWaterBBL":686.6,"wellCount":67},{"month":68,"avgOilBBL":478.7,"avgGasMCF":1467.2,"avgWaterBBL":643.7,"wellCount":67},{"month":69,"avgOilBBL":416.7,"avgGasMCF":1451.1,"avgWaterBBL":674.6,"wellCount":67},{"month":70,"avgOilBBL":459.9,"avgGasMCF":1369.3,"avgWaterBBL":670.6,"wellCount":67},{"month":71,"avgOilBBL":465.8,"avgGasMCF":1348.9,"avgWaterBBL":713.9,"wellCount":67},{"month":72,"avgOilBBL":506.5,"avgGasMCF":1442.6,"avgWaterBBL":1192.5,"wellCount":67},{"month":73,"avgOilBBL":505.1,"avgGasMCF":1388.9,"avgWaterBBL":897.2,"wellCount":67},{"month":74,"avgOilBBL":522.7,"avgGasMCF":1446.6,"avgWaterBBL":769.8,"wellCount":67},{"month":75,"avgOilBBL":621.7,"avgGasMCF":2478.7,"avgWaterBBL":755.4,"wellCount":66},{"month":76,"avgOilBBL":635.7,"avgGasMCF":2396,"avgWaterBBL":730.9,"wellCount":66},{"month":77,"avgOilBBL":619.7,"avgGasMCF":2361,"avgWaterBBL":806.4,"wellCount":66},{"month":78,"avgOilBBL":594.2,"avgGasMCF":2377.5,"avgWaterBBL":777.5,"wellCount":66},{"month":79,"avgOilBBL":601.3,"avgGasMCF":2425.1,"avgWaterBBL":499.5,"wellCount":65},{"month":80,"avgOilBBL":559.9,"avgGasMCF":2157.9,"avgWaterBBL":551.4,"wellCount":65},{"month":81,"avgOilBBL":546.8,"avgGasMCF":2456.3,"avgWaterBBL":573.8,"wellCount":65},{"month":82,"avgOilBBL":521.6,"avgGasMCF":2423.9,"avgWaterBBL":519.4,"wellCount":65},{"month":83,"avgOilBBL":531.1,"avgGasMCF":2369.1,"avgWaterBBL":526.3,"wellCount":65},{"month":84,"avgOilBBL":572.8,"avgGasMCF":2457.6,"avgWaterBBL":575.8,"wellCount":65},{"month":85,"avgOilBBL":546.3,"avgGasMCF":2215.1,"avgWaterBBL":375,"wellCount":65},{"month":86,"avgOilBBL":596.1,"avgGasMCF":2298.8,"avgWaterBBL":496.3,"wellCount":65},{"month":87,"avgOilBBL":584.5,"avgGasMCF":2241.9,"avgWaterBBL":583.7,"wellCount":65},{"month":88,"avgOilBBL":614.3,"avgGasMCF":1506.4,"avgWaterBBL":577.3,"wellCount":65},{"month":89,"avgOilBBL":436.9,"avgGasMCF":4725.6,"avgWaterBBL":595,"wellCount":64},{"month":90,"avgOilBBL":414.2,"avgGasMCF":4220.7,"avgWaterBBL":578,"wellCount":64},{"month":91,"avgOilBBL":439.7,"avgGasMCF":4290.7,"avgWaterBBL":578.4,"wellCount":64},{"month":92,"avgOilBBL":369.8,"avgGasMCF":4020.1,"avgWaterBBL":479.1,"wellCount":64},{"month":93,"avgOilBBL":406.6,"avgGasMCF":5379.6,"avgWaterBBL":465,"wellCount":64},{"month":94,"avgOilBBL":413.9,"avgGasMCF":5675.7,"avgWaterBBL":463.8,"wellCount":64},{"month":95,"avgOilBBL":387.8,"avgGasMCF":5767.5,"avgWaterBBL":449.5,"wellCount":63},{"month":96,"avgOilBBL":374.1,"avgGasMCF":5249.3,"avgWaterBBL":405.4,"wellCount":64},{"month":97,"avgOilBBL":342,"avgGasMCF":4621.8,"avgWaterBBL":380.6,"wellCount":64},{"month":98,"avgOilBBL":327.3,"avgGasMCF":4213.2,"avgWaterBBL":228.9,"wellCount":63},{"month":99,"avgOilBBL":350,"avgGasMCF":4980.2,"avgWaterBBL":257,"wellCount":63},{"month":100,"avgOilBBL":391,"avgGasMCF":5639.9,"avgWaterBBL":252.1,"wellCount":63},{"month":101,"avgOilBBL":471.6,"avgGasMCF":4788.1,"avgWaterBBL":196.1,"wellCount":64},{"month":102,"avgOilBBL":389.5,"avgGasMCF":4342.4,"avgWaterBBL":185.3,"wellCount":64},{"month":103,"avgOilBBL":409.6,"avgGasMCF":4346.8,"avgWaterBBL":197,"wellCount":64},{"month":104,"avgOilBBL":369.5,"avgGasMCF":4123.6,"avgWaterBBL":197.4,"wellCount":64},{"month":105,"avgOilBBL":383,"avgGasMCF":4258.6,"avgWaterBBL":179.3,"wellCount":63},{"month":106,"avgOilBBL":397.7,"avgGasMCF":3335,"avgWaterBBL":184.2,"wellCount":63},{"month":107,"avgOilBBL":411.9,"avgGasMCF":3730.8,"avgWaterBBL":180.1,"wellCount":63},{"month":108,"avgOilBBL":414.4,"avgGasMCF":4786.8,"avgWaterBBL":170.7,"wellCount":63},{"month":109,"avgOilBBL":409,"avgGasMCF":4162.7,"avgWaterBBL":179.5,"wellCount":63},{"month":110,"avgOilBBL":409.5,"avgGasMCF":3464.2,"avgWaterBBL":195.4,"wellCount":63},{"month":111,"avgOilBBL":363.8,"avgGasMCF":2815.7,"avgWaterBBL":181.3,"wellCount":63},{"month":112,"avgOilBBL":395.7,"avgGasMCF":4517.4,"avgWaterBBL":194.3,"wellCount":62},{"month":113,"avgOilBBL":398.2,"avgGasMCF":5087.8,"avgWaterBBL":184.3,"wellCount":62},{"month":114,"avgOilBBL":376.1,"avgGasMCF":4726.5,"avgWaterBBL":192.9,"wellCount":62},{"month":115,"avgOilBBL":395.6,"avgGasMCF":4999,"avgWaterBBL":221.3,"wellCount":62},{"month":116,"avgOilBBL":379.9,"avgGasMCF":4384.7,"avgWaterBBL":237.6,"wellCount":62},{"month":117,"avgOilBBL":365.5,"avgGasMCF":3389.4,"avgWaterBBL":258.5,"wellCount":62},{"month":118,"avgOilBBL":338.9,"avgGasMCF":4164.8,"avgWaterBBL":244.3,"wellCount":62},{"month":119,"avgOilBBL":344.7,"avgGasMCF":3551.5,"avgWaterBBL":265.1,"wellCount":62},{"month":120,"avgOilBBL":335,"avgGasMCF":4861.5,"avgWaterBBL":232.2,"wellCount":62}];
+
+const WELLS = [{"API_UWI":"42-495-34642","CompletionDate":"2022-01-07T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"2022-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.7183821,"Longitude":-102.9773296,"MD_FT":5924,"Section_Township_Range":null,"SpudDate":"2021-11-19T00:00:00Z","TVD_FT":5924,"Trajectory":"VERTICAL","WellName":"SEALY & SMITH UNIT 30"},{"API_UWI":"42-495-34641","CompletionDate":"2022-01-14T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"2022-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.722785,"Longitude":-102.9792337,"MD_FT":5909,"Section_Township_Range":null,"SpudDate":"2021-11-12T00:00:00Z","TVD_FT":5909,"Trajectory":"VERTICAL","WellName":"SEALY & SMITH UNIT 29"},{"API_UWI":"42-495-34640","CompletionDate":"2022-01-18T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"2022-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.7217,"Longitude":-102.9832168,"MD_FT":5908,"Section_Township_Range":null,"SpudDate":"2021-11-05T00:00:00Z","TVD_FT":5908,"Trajectory":"VERTICAL","WellName":"SEALY & SMITH UNIT 28"},{"API_UWI":"42-495-34420","CompletionDate":"2019-10-09T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"2019-10-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8969934,"Longitude":-103.066978,"MD_FT":5703,"Section_Township_Range":null,"SpudDate":"2019-09-11T00:00:00Z","TVD_FT":5703,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1903"},{"API_UWI":"42-495-34233","CompletionDate":"2024-05-12T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"2019-06-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.778981,"Longitude":-103.063569,"MD_FT":7860,"Section_Township_Range":null,"SpudDate":"2019-02-01T00:00:00Z","TVD_FT":7855,"Trajectory":"VERTICAL","WellName":"BROWN-ALTMAN 20"},{"API_UWI":"42-495-33701","CompletionDate":"2023-09-12T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"2016-09-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.7757949,"Longitude":-103.0585751,"MD_FT":5130,"Section_Township_Range":null,"SpudDate":"2016-06-12T00:00:00Z","TVD_FT":5130,"Trajectory":"VERTICAL","WellName":"HALLEY, S. M. -B- 46"},{"API_UWI":"42-495-33704","CompletionDate":"2024-10-08T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"2016-07-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.88088,"Longitude":-103.079802,"MD_FT":5717,"Section_Township_Range":null,"SpudDate":"2016-03-26T00:00:00Z","TVD_FT":5669,"Trajectory":"VERTICAL","WellName":"CAMPBELL, GRANT C 3"},{"API_UWI":"42-495-32860","CompletionDate":"2023-06-28T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"2001-08-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8978604,"Longitude":-103.0634808,"MD_FT":5600,"Section_Township_Range":null,"SpudDate":"2001-06-15T00:00:00Z","TVD_FT":5600,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1959W"},{"API_UWI":"42-495-31312","CompletionDate":"2024-05-08T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1981-08-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8909787,"Longitude":-103.0740171,"MD_FT":5500,"Section_Township_Range":null,"SpudDate":"1981-07-11T00:00:00Z","TVD_FT":5500,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1867C"},{"API_UWI":"42-495-31222","CompletionDate":"2023-12-03T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1981-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9047993,"Longitude":-103.0660261,"MD_FT":5500,"Section_Township_Range":null,"SpudDate":"1980-11-22T00:00:00Z","TVD_FT":5500,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1251C"},{"API_UWI":"42-495-31097","CompletionDate":"2024-09-18T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"LIQUIDS RICH GAS (10-40% WH LIQUIDS)","FirstProdDate":"1980-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9223216,"Longitude":-103.0509279,"MD_FT":5040,"Section_Township_Range":null,"SpudDate":"1978-12-14T00:00:00Z","TVD_FT":5040,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 9337"},{"API_UWI":"42-495-30904","CompletionDate":"2023-01-15T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1978-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9356214,"Longitude":-103.0563836,"MD_FT":5020,"Section_Township_Range":null,"SpudDate":"1977-12-17T00:00:00Z","TVD_FT":5020,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 9331"},{"API_UWI":"42-495-01168","CompletionDate":"2021-04-29T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1968-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9223924,"Longitude":-103.0412875,"MD_FT":4952,"Section_Township_Range":null,"SpudDate":"1946-04-30T00:00:00Z","TVD_FT":4952,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 988"},{"API_UWI":"42-495-32826","CompletionDate":"2023-11-16T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"2001-02-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8890458,"Longitude":-103.0821785,"MD_FT":5628,"Section_Township_Range":null,"SpudDate":"2001-01-08T00:00:00Z","TVD_FT":5628,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1877"},{"API_UWI":"42-495-32705","CompletionDate":"2024-03-10T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1998-06-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8947396,"Longitude":-103.0753593,"MD_FT":5600,"Section_Township_Range":null,"SpudDate":"1997-10-24T00:00:00Z","TVD_FT":5599,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1874C"},{"API_UWI":"42-495-31311","CompletionDate":"2024-02-17T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1981-11-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8929637,"Longitude":-103.0815145,"MD_FT":5509,"Section_Township_Range":null,"SpudDate":"1981-09-23T00:00:00Z","TVD_FT":5509,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1866W"},{"API_UWI":"42-495-31272","CompletionDate":"2024-04-11T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1981-02-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9022002,"Longitude":-103.0612848,"MD_FT":5501,"Section_Township_Range":null,"SpudDate":"1980-12-11T00:00:00Z","TVD_FT":5501,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1252"},{"API_UWI":"42-495-30895","CompletionDate":"2024-05-24T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1977-12-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9282636,"Longitude":-103.0567864,"MD_FT":4980,"Section_Township_Range":null,"SpudDate":"1977-12-02T00:00:00Z","TVD_FT":4980,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 9329"},{"API_UWI":"42-495-30439","CompletionDate":"2023-11-02T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1976-06-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9217114,"Longitude":-103.0384073,"MD_FT":5010,"Section_Township_Range":null,"SpudDate":"1976-05-10T00:00:00Z","TVD_FT":5010,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 9322"},{"API_UWI":"42-495-30266","CompletionDate":"1991-03-20T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1982-12-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.7186921,"Longitude":-103.0085177,"MD_FT":5450,"Section_Township_Range":null,"SpudDate":"1974-03-17T00:00:00Z","TVD_FT":5450,"Trajectory":"VERTICAL","WellName":"HILL, M. J. -23- 27"},{"API_UWI":"42-495-10736","CompletionDate":"1962-08-01T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1962-08-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.7209511,"Longitude":-102.9985543,"MD_FT":null,"Section_Township_Range":null,"SpudDate":null,"TVD_FT":5240,"Trajectory":"VERTICAL","WellName":"MITCHELL, G. P., -B- 14"},{"API_UWI":"42-495-04125","CompletionDate":"2022-10-20T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1993-08-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9207504,"Longitude":-103.0363172,"MD_FT":5041,"Section_Township_Range":null,"SpudDate":"1946-04-27T00:00:00Z","TVD_FT":5041,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 509"},{"API_UWI":"42-495-03964","CompletionDate":"1984-08-20T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1984-08-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9328475,"Longitude":-103.0575186,"MD_FT":5028,"Section_Township_Range":null,"SpudDate":"1935-07-02T00:00:00Z","TVD_FT":5028,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 602W"},{"API_UWI":"42-495-01271","CompletionDate":"2024-06-05T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1968-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9276982,"Longitude":-103.0383255,"MD_FT":5092,"Section_Township_Range":null,"SpudDate":"1947-06-13T00:00:00Z","TVD_FT":5092,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 9117"},{"API_UWI":"42-495-31931","CompletionDate":"1985-06-24T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1985-06-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.7166752,"Longitude":-102.9994193,"MD_FT":5700,"Section_Township_Range":null,"SpudDate":"1985-05-25T00:00:00Z","TVD_FT":5700,"Trajectory":"VERTICAL","WellName":"SEALY & SMITH UNIT 20"},{"API_UWI":"42-495-31438","CompletionDate":"2024-06-08T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1982-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8930518,"Longitude":-103.0835796,"MD_FT":5500,"Section_Township_Range":null,"SpudDate":"1982-01-14T00:00:00Z","TVD_FT":5500,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1869"},{"API_UWI":"42-495-03372","CompletionDate":"1983-08-10T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1983-07-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.7201361,"Longitude":-103.0013314,"MD_FT":5385,"Section_Township_Range":null,"SpudDate":"1958-02-16T00:00:00Z","TVD_FT":5385,"Trajectory":"VERTICAL","WellName":"MITCHELL, G. P., -B- 5"},{"API_UWI":"42-495-32828","CompletionDate":"2001-01-31T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"2001-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8935805,"Longitude":-103.0655118,"MD_FT":5600,"Section_Township_Range":null,"SpudDate":"2000-12-13T00:00:00Z","TVD_FT":5600,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1958"},{"API_UWI":"42-495-32263","CompletionDate":"1989-08-01T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"LIQUIDS RICH GAS (10-40% WH LIQUIDS)","FirstProdDate":"1989-08-01T00:00:00Z","Formation":"CLEAR FORK LOWER","Latitude":31.7756638,"Longitude":-103.0499167,"MD_FT":null,"Section_Township_Range":null,"SpudDate":"1989-06-10T00:00:00Z","TVD_FT":8245,"Trajectory":"VERTICAL","WellName":"HALLEY, S. M. -B- 39H"},{"API_UWI":"42-495-31273","CompletionDate":"2006-07-13T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1981-02-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9082154,"Longitude":-103.0803339,"MD_FT":5503,"Section_Township_Range":null,"SpudDate":"1980-12-30T07:00:00Z","TVD_FT":5503,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1376"},{"API_UWI":"42-495-05252","CompletionDate":"1959-06-01T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"LIQUIDS RICH GAS (10-40% WH LIQUIDS)","FirstProdDate":"1959-06-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.7211691,"Longitude":-102.9973823,"MD_FT":1220,"Section_Township_Range":null,"SpudDate":"1956-08-21T00:00:00Z","TVD_FT":1220,"Trajectory":"VERTICAL","WellName":"WEST 22 UNIT 3"},{"API_UWI":"42-495-05120","CompletionDate":"2024-01-04T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1950-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8854078,"Longitude":-103.0780542,"MD_FT":5500,"Section_Township_Range":null,"SpudDate":"1953-11-03T00:00:00Z","TVD_FT":5500,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1824"},{"API_UWI":"42-495-03468","CompletionDate":"1945-06-07T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1968-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9184932,"Longitude":-103.0264627,"MD_FT":4760,"Section_Township_Range":null,"SpudDate":"1945-03-30T00:00:00Z","TVD_FT":4760,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 1303W"},{"API_UWI":"42-495-32827","CompletionDate":"2001-02-14T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"LIQUIDS RICH GAS (10-40% WH LIQUIDS)","FirstProdDate":"2001-02-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8901627,"Longitude":-103.0781293,"MD_FT":5600,"Section_Township_Range":null,"SpudDate":"2000-12-28T00:00:00Z","TVD_FT":5600,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1878"},{"API_UWI":"42-495-32793","CompletionDate":"2000-07-06T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"2000-07-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8942564,"Longitude":-103.0623487,"MD_FT":5595,"Section_Township_Range":null,"SpudDate":"2000-06-13T00:00:00Z","TVD_FT":5595,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1957W"},{"API_UWI":"42-495-31300","CompletionDate":"2023-11-24T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1982-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9066805,"Longitude":-103.0843251,"MD_FT":5503,"Section_Township_Range":null,"SpudDate":"1981-11-21T00:00:00Z","TVD_FT":5503,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1377C"},{"API_UWI":"42-495-31150","CompletionDate":"2024-12-30T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"LIQUIDS RICH GAS (10-40% WH LIQUIDS)","FirstProdDate":"1980-06-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9038046,"Longitude":-103.0831629,"MD_FT":5772,"Section_Township_Range":null,"SpudDate":"1980-05-01T00:00:00Z","TVD_FT":5772,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1372"},{"API_UWI":"42-495-03691","CompletionDate":"2022-09-14T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1990-03-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9501423,"Longitude":-103.0649114,"MD_FT":5150,"Section_Township_Range":null,"SpudDate":"1948-07-28T00:00:00Z","TVD_FT":5150,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 251"},{"API_UWI":"42-495-32797","CompletionDate":"2000-06-23T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"2000-06-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8877699,"Longitude":-103.0856276,"MD_FT":5550,"Section_Township_Range":null,"SpudDate":"2000-06-01T00:00:00Z","TVD_FT":5550,"Trajectory":"VERTICAL","WellName":"LOVETT-SINCLAIR 6"},{"API_UWI":"42-495-31309","CompletionDate":"1981-12-08T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1981-12-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8873517,"Longitude":-103.072933,"MD_FT":5526,"Section_Township_Range":null,"SpudDate":"1981-10-30T00:00:00Z","TVD_FT":5526,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1868C"},{"API_UWI":"42-495-31223","CompletionDate":"2024-01-14T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1980-10-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8974006,"Longitude":-103.0808096,"MD_FT":5500,"Section_Township_Range":null,"SpudDate":"1980-08-07T00:00:00Z","TVD_FT":5500,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1375C"},{"API_UWI":"42-495-31151","CompletionDate":"2023-06-01T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1980-04-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9005766,"Longitude":-103.0826558,"MD_FT":5457,"Section_Township_Range":null,"SpudDate":"1980-03-28T00:00:00Z","TVD_FT":5457,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1373W"},{"API_UWI":"42-495-31067","CompletionDate":"2024-02-12T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1979-10-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9017355,"Longitude":-103.0776646,"MD_FT":5450,"Section_Township_Range":null,"SpudDate":"1979-08-24T00:00:00Z","TVD_FT":5450,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1369C"},{"API_UWI":"42-495-31066","CompletionDate":"1979-08-09T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"LIQUIDS RICH GAS (10-40% WH LIQUIDS)","FirstProdDate":"1979-08-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9028154,"Longitude":-103.0736605,"MD_FT":5400,"Section_Township_Range":null,"SpudDate":"1979-07-14T00:00:00Z","TVD_FT":5400,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1368W"},{"API_UWI":"42-495-30535","CompletionDate":"1977-11-13T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1977-10-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9332574,"Longitude":-103.0520213,"MD_FT":5020,"Section_Township_Range":null,"SpudDate":"1977-09-29T00:00:00Z","TVD_FT":5020,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 9327"},{"API_UWI":"42-495-04479","CompletionDate":"2000-11-03T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"LIQUIDS RICH GAS (10-40% WH LIQUIDS)","FirstProdDate":"1959-08-01T00:00:00Z","Formation":"CLEAR FORK,GLORIETA","Latitude":31.7152902,"Longitude":-102.990684,"MD_FT":10410,"Section_Township_Range":null,"SpudDate":"1958-02-13T07:00:00Z","TVD_FT":10410,"Trajectory":"VERTICAL","WellName":"SEALY & SMITH UNIT 6"},{"API_UWI":"42-495-32798","CompletionDate":"2025-04-01T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"LIQUIDS RICH GAS (10-40% WH LIQUIDS)","FirstProdDate":"2000-07-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8934589,"Longitude":-103.0926661,"MD_FT":5608,"Section_Township_Range":null,"SpudDate":"2000-06-28T00:00:00Z","TVD_FT":5608,"Trajectory":"VERTICAL","WellName":"LOVETT, H. E. 10"},{"API_UWI":"42-495-31605","CompletionDate":"1992-02-05T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1983-11-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.7268529,"Longitude":-103.0043556,"MD_FT":5374,"Section_Township_Range":null,"SpudDate":"1963-09-06T00:00:00Z","TVD_FT":5374,"Trajectory":"VERTICAL","WellName":"MITCHELL, G. P., -B- 15"},{"API_UWI":"42-495-31149","CompletionDate":"2022-11-23T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1980-07-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9003154,"Longitude":-103.0682631,"MD_FT":5500,"Section_Township_Range":null,"SpudDate":"1980-05-23T06:00:00Z","TVD_FT":5500,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1248W"},{"API_UWI":"42-495-31109","CompletionDate":"2023-11-14T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"LIQUIDS RICH GAS (10-40% WH LIQUIDS)","FirstProdDate":"1980-04-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9056594,"Longitude":-103.0748426,"MD_FT":5450,"Section_Township_Range":null,"SpudDate":"1980-03-13T00:00:00Z","TVD_FT":5450,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1371W"},{"API_UWI":"42-495-30441","CompletionDate":"2019-06-07T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1976-09-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9306383,"Longitude":-103.046787,"MD_FT":5015,"Section_Township_Range":null,"SpudDate":"1976-09-02T00:00:00Z","TVD_FT":5015,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 9324"},{"API_UWI":"42-495-30394","CompletionDate":"1986-06-13T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1975-11-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9252014,"Longitude":-103.0408605,"MD_FT":5010,"Section_Township_Range":null,"SpudDate":"1975-11-04T00:00:00Z","TVD_FT":5010,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 9321W"},{"API_UWI":"42-495-00432","CompletionDate":"2024-08-06T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1968-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9421965,"Longitude":-103.0660882,"MD_FT":5065,"Section_Township_Range":null,"SpudDate":"1948-07-01T00:00:00Z","TVD_FT":5063,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 706W"},{"API_UWI":"42-495-32720","CompletionDate":"2023-06-19T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"WET GAS (1-10% WH LIQUIDS)","FirstProdDate":"1998-09-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8913374,"Longitude":-103.0569503,"MD_FT":10520,"Section_Township_Range":null,"SpudDate":"1998-07-12T00:00:00Z","TVD_FT":10518,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1954"},{"API_UWI":"42-495-31303","CompletionDate":"1981-10-29T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1981-11-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.7195261,"Longitude":-103.0054436,"MD_FT":5520,"Section_Township_Range":null,"SpudDate":"1981-07-29T00:00:00Z","TVD_FT":5520,"Trajectory":"VERTICAL","WellName":"HILL, M. J. -23- 29"},{"API_UWI":"42-495-31221","CompletionDate":"2023-10-26T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"LIQUIDS RICH GAS (10-40% WH LIQUIDS)","FirstProdDate":"1980-08-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9037753,"Longitude":-103.0697313,"MD_FT":5500,"Section_Township_Range":null,"SpudDate":"1980-07-16T00:00:00Z","TVD_FT":5500,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1250C"},{"API_UWI":"42-495-31178","CompletionDate":"2024-02-06T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"WET GAS (1-10% WH LIQUIDS)","FirstProdDate":"1980-09-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8904739,"Longitude":-103.0916959,"MD_FT":5500,"Section_Township_Range":null,"SpudDate":"1980-06-12T00:00:00Z","TVD_FT":5500,"Trajectory":"VERTICAL","WellName":"LOVETT-SINCLAIR 3"},{"API_UWI":"42-495-31152","CompletionDate":"2010-02-17T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1980-06-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8993345,"Longitude":-103.0725353,"MD_FT":5449,"Section_Township_Range":null,"SpudDate":"1980-04-13T07:00:00Z","TVD_FT":5449,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1374W"},{"API_UWI":"42-495-31110","CompletionDate":"2023-06-23T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1980-04-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9043345,"Longitude":-103.0784727,"MD_FT":5450,"Section_Township_Range":null,"SpudDate":"1980-02-22T00:00:00Z","TVD_FT":5450,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1370W"},{"API_UWI":"42-495-10245","CompletionDate":"1963-01-11T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1963-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.7279429,"Longitude":-102.9998534,"MD_FT":5245,"Section_Township_Range":null,"SpudDate":"1962-12-15T00:00:00Z","TVD_FT":5245,"Trajectory":"VERTICAL","WellName":"MITCHELL, G. P., -B- 13"},{"API_UWI":"42-495-04477","CompletionDate":"1986-04-29T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1986-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.7177982,"Longitude":-102.9955312,"MD_FT":5500,"Section_Township_Range":null,"SpudDate":"1986-01-15T00:00:00Z","TVD_FT":5500,"Trajectory":"VERTICAL","WellName":"SEALY & SMITH UNIT 15"},{"API_UWI":"42-495-04468","CompletionDate":"1987-02-01T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1959-08-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.7139642,"Longitude":-102.9947581,"MD_FT":5500,"Section_Township_Range":null,"SpudDate":"1986-10-03T00:00:00Z","TVD_FT":5500,"Trajectory":"VERTICAL","WellName":"SEALY & SMITH UNIT 4"},{"API_UWI":"42-495-01166","CompletionDate":"2022-08-03T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1946-08-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.930089,"Longitude":-103.0300722,"MD_FT":5100,"Section_Township_Range":null,"SpudDate":"1946-07-16T00:00:00Z","TVD_FT":5100,"Trajectory":"VERTICAL","WellName":"KEYSTONE HOLT UNIT 986"},{"API_UWI":"42-495-31434","CompletionDate":"2022-12-02T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"LIQUIDS RICH GAS (10-40% WH LIQUIDS)","FirstProdDate":"1982-03-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8922176,"Longitude":-103.069653,"MD_FT":5505,"Section_Township_Range":null,"SpudDate":"1982-02-11T07:00:00Z","TVD_FT":5498,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1873W"},{"API_UWI":"42-495-31298","CompletionDate":"1996-12-09T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1981-10-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8967667,"Longitude":-103.0849918,"MD_FT":5500,"Section_Township_Range":null,"SpudDate":"1981-07-29T00:00:00Z","TVD_FT":5500,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1379"},{"API_UWI":"42-495-31211","CompletionDate":"2002-10-26T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1980-08-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8955803,"Longitude":-103.0589905,"MD_FT":5500,"Section_Township_Range":null,"SpudDate":"1980-06-21T06:00:00Z","TVD_FT":5500,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1949"},{"API_UWI":"42-495-31224","CompletionDate":"2014-02-06T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"OIL (40%+ WH LIQUIDS)","FirstProdDate":"1980-10-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8986753,"Longitude":-103.0600757,"MD_FT":5500,"Section_Township_Range":null,"SpudDate":"1980-08-25T00:00:00Z","TVD_FT":5500,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1948C"},{"API_UWI":"42-495-32765","CompletionDate":"2014-06-02T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"LIQUIDS RICH GAS (10-40% WH LIQUIDS)","FirstProdDate":"1999-09-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9063704,"Longitude":-103.0781958,"MD_FT":10045,"Section_Township_Range":null,"SpudDate":"1999-08-05T00:00:00Z","TVD_FT":10045,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1381"},{"API_UWI":"42-495-32852","CompletionDate":"2024-06-14T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"WET GAS (1-10% WH LIQUIDS)","FirstProdDate":"2001-08-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.8881287,"Longitude":-103.073204,"MD_FT":10150,"Section_Township_Range":null,"SpudDate":"2001-05-07T00:00:00Z","TVD_FT":10150,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1879"},{"API_UWI":"42-495-32745","CompletionDate":"2024-03-06T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"WET GAS (1-10% WH LIQUIDS)","FirstProdDate":"1999-05-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.9033183,"Longitude":-103.0649531,"MD_FT":10100,"Section_Township_Range":null,"SpudDate":"1999-02-09T00:00:00Z","TVD_FT":10100,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1257"},{"API_UWI":"42-495-33299","CompletionDate":"2024-07-02T00:00:00Z","County":"WINKLER","ENVOperator":"BASIN OIL & GAS","ENVProdWellType":"LIQUIDS RICH GAS (10-40% WH LIQUIDS)","FirstProdDate":"2009-01-01T00:00:00Z","Formation":"CLEAR FORK","Latitude":31.901793,"Longitude":-103.07647,"MD_FT":12286,"Section_Township_Range":null,"SpudDate":"2008-08-20T00:00:00Z","TVD_FT":10285,"Trajectory":"VERTICAL","WellName":"BAIRD, W. E. 1386"}];
+
+// AOI polygon (approximate from screenshot - Winkler County gray shaded area)
+// This is the approximate position south of Basin's Keystone operations
+const AOI_COORDS = [
+  [31.78, -103.18], [31.78, -103.08],
+  [31.72, -103.08], [31.72, -103.18]
+];
+
+// =============================================
+// MAP SETUP
+// =============================================
+const map = L.map('map', { zoomControl: true }).setView([31.82, -103.13], 12);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap &copy; CARTO',
+  maxZoom: 19
+}).addTo(map);
+
+// AOI polygon
+const aoiLayer = L.polygon(AOI_COORDS, {
+  color: '#8b949e', weight: 2, fillColor: '#8b949e', fillOpacity: 0.25, dashArray: '5,5'
+}).addTo(map).bindPopup('<b>Platform Energy AOI</b><br>Target Area — Clear Fork');
+
+// Well markers
+const wellMarkers = L.layerGroup();
+WELLS.forEach(w => {
+  if (!w.Latitude || !w.Longitude) return;
+  const fpd = w.FirstProdDate ? w.FirstProdDate.substring(0, 10) : 'N/A';
+  const marker = L.circleMarker([w.Latitude, w.Longitude], {
+    radius: 5, color: '#58a6ff', fillColor: '#58a6ff', fillOpacity: 0.7, weight: 1
+  }).bindPopup(`
+    <b>${w.WellName}</b><br>
+    API: ${w.API_UWI}<br>
+    Formation: ${w.Formation}<br>
+    First Prod: ${fpd}<br>
+    Operator: ${w.ENVOperator}<br>
+    TD: ${w.TVD_FT || w.MD_FT || 'N/A'} ft
+  `);
+  wellMarkers.addLayer(marker);
+});
+wellMarkers.addTo(map);
+
+// Planned well locations (spread across AOI)
+const plannedMarkers = L.layerGroup();
+function updatePlannedWells(count) {
+  plannedMarkers.clearLayers();
+  const latMin = 31.72, latMax = 31.78, lonMin = -103.18, lonMax = -103.08;
+  const cols = Math.ceil(Math.sqrt(count * 1.5));
+  const rows = Math.ceil(count / cols);
+  let idx = 0;
+  for (let r = 0; r < rows && idx < count; r++) {
+    for (let c = 0; c < cols && idx < count; c++) {
+      const lat = latMin + (latMax - latMin) * (r + 0.5) / rows;
+      const lon = lonMin + (lonMax - lonMin) * (c + 0.5) / cols;
+      const marker = L.circleMarker([lat, lon], {
+        radius: 4, color: '#3fb950', fillColor: '#3fb950', fillOpacity: 0.5, weight: 1
+      }).bindPopup(`<b>Planned Well ${idx + 1}</b><br>Clear Fork Vertical`);
+      plannedMarkers.addLayer(marker);
+      idx++;
+    }
+  }
+}
+updatePlannedWells(60);
+plannedMarkers.addTo(map);
+
+// Legend
+const legend = L.control({ position: 'bottomright' });
+legend.onAdd = () => {
+  const div = L.DomUtil.create('div', 'legend');
+  div.innerHTML = `
+    <b>Legend</b><br>
+    <span class="legend-dot" style="background:#58a6ff"></span> Basin Analog Wells<br>
+    <span class="legend-dot" style="background:#3fb950"></span> Planned Locations<br>
+    <span class="legend-dot" style="background:#8b949e"></span> AOI / Position
+  `;
+  return div;
+};
+legend.addTo(map);
+
+// Layer toggles
+document.getElementById('t-wells').addEventListener('change', e => e.target.checked ? wellMarkers.addTo(map) : map.removeLayer(wellMarkers));
+document.getElementById('t-aoi').addEventListener('change', e => e.target.checked ? aoiLayer.addTo(map) : map.removeLayer(aoiLayer));
+document.getElementById('t-planned').addEventListener('change', e => e.target.checked ? plannedMarkers.addTo(map) : map.removeLayer(plannedMarkers));
+
+// =============================================
+// CHARTS
+// =============================================
+const tcCtx = document.getElementById('chart-tc').getContext('2d');
+const tcChart = new Chart(tcCtx, {
+  type: 'line',
+  data: {
+    labels: TYPE_CURVE.slice(0, 60).map(p => p.month),
+    datasets: [{
+      label: 'Oil (BBL/mo)',
+      data: TYPE_CURVE.slice(0, 60).map(p => p.avgOilBBL),
+      borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,0.1)',
+      fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2
+    }, {
+      label: 'Gas (MCF/mo ÷10)',
+      data: TYPE_CURVE.slice(0, 60).map(p => p.avgGasMCF / 10),
+      borderColor: '#d29922', backgroundColor: 'transparent',
+      tension: 0.3, pointRadius: 0, borderWidth: 1.5, borderDash: [4, 2]
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#8b949e', font: { size: 10 } } }, title: { display: true, text: 'Avg Type Curve (per well)', color: '#c9d1d9', font: { size: 12 } } },
+    scales: {
+      x: { title: { display: true, text: 'Month', color: '#8b949e' }, ticks: { color: '#484f58', maxTicksLimit: 12 }, grid: { color: '#21262d' } },
+      y: { title: { display: true, text: 'BBL/mo', color: '#8b949e' }, ticks: { color: '#484f58' }, grid: { color: '#21262d' } }
+    }
+  }
+});
+
+const cfCtx = document.getElementById('chart-cf').getContext('2d');
+const cfChart = new Chart(cfCtx, {
+  type: 'bar',
+  data: {
+    labels: Array.from({ length: 10 }, (_, i) => `Yr ${i + 1}`),
+    datasets: [{
+      label: 'ORRI Income',
+      data: Array(10).fill(0),
+      backgroundColor: '#238636', borderColor: '#3fb950', borderWidth: 1
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#8b949e', font: { size: 10 } } }, title: { display: true, text: 'Annual ORRI Income', color: '#c9d1d9', font: { size: 12 } } },
+    scales: {
+      x: { ticks: { color: '#484f58' }, grid: { color: '#21262d' } },
+      y: { ticks: { color: '#484f58', callback: v => '$' + (v/1000).toFixed(0) + 'K' }, grid: { color: '#21262d' } }
+    }
+  }
+});
+
+// =============================================
+// MODEL CALCULATION
+// =============================================
+function arpsQ(qi, b, Di, month) {
+  return qi / Math.pow(1 + b * Di * month, 1 / b);
+}
+
+function recalc() {
+  const totalWells = +document.getElementById('s-wells').value;
+  const wpy = +document.getElementById('s-wpy').value;
+  const yr1 = +document.getElementById('s-yr1').value;
+  const dcCost = +document.getElementById('s-dc').value;
+  const wti = +document.getElementById('s-wti').value;
+  const gasPrice = +document.getElementById('s-gas').value;
+  const discRate = +document.getElementById('s-disc').value / 100;
+  const orriPct = +document.getElementById('s-orri').value / 100;
+
+  // Update display values
+  document.getElementById('v-wells').textContent = totalWells;
+  document.getElementById('v-wpy').textContent = wpy;
+  document.getElementById('v-yr1').textContent = yr1;
+  document.getElementById('v-dc').textContent = '$' + dcCost.toLocaleString();
+  document.getElementById('v-wti').textContent = '$' + wti.toFixed(2);
+  document.getElementById('v-gas').textContent = '$' + gasPrice.toFixed(2);
+  document.getElementById('v-disc').textContent = discRate * 100 + '%';
+  document.getElementById('v-orri').textContent = (orriPct * 100).toFixed(3) + '%';
+
+  // Build dev schedule
+  const schedule = [];
+  let drilled = 0;
+  for (let yr = 0; yr < 15 && drilled < totalWells; yr++) {
+    const newW = yr === 0 ? Math.min(yr1, totalWells) : Math.min(wpy, totalWells - drilled);
+    schedule.push(newW);
+    drilled += newW;
+  }
+
+  const { qi, b, Di } = DECLINE;
+  const sevOil = 0.046, sevGas = 0.075, adVal = 0.025;
+
+  let totalUndisc = 0, totalPV = 0, totalOil = 0, totalCapex = 0;
+  const annualOrri = [];
+  const annualOil = [];
+
+  // 10 production years (even if drilling stops earlier)
+  const prodYears = Math.max(10, schedule.length + 5);
+  for (let yr = 0; yr < prodYears; yr++) {
+    let yearOil = 0, yearGas = 0;
+
+    for (let v = 0; v < schedule.length && v <= yr; v++) {
+      const nw = schedule[v];
+      if (nw === 0) continue;
+      const baseMonth = (yr - v) * 12;
+      for (let m = 0; m < 12; m++) {
+        const oilPerWell = arpsQ(qi, b, Di, baseMonth + m);
+        const tcIdx = Math.min(baseMonth + m, TYPE_CURVE.length - 1);
+        const gor = TYPE_CURVE[tcIdx] ? TYPE_CURVE[tcIdx].avgGasMCF / Math.max(TYPE_CURVE[tcIdx].avgOilBBL, 1) : 5;
+        yearOil += oilPerWell * nw;
+        yearGas += oilPerWell * gor * nw;
+      }
+    }
+
+    const grossOilRev = yearOil * wti;
+    const grossGasRev = yearGas * gasPrice;
+    const grossRev = grossOilRev + grossGasRev;
+    const deductions = grossOilRev * sevOil + grossGasRev * sevGas + grossRev * adVal;
+    const netRev = grossRev - deductions;
+    const orri = netRev * orriPct;
+    const pvFactor = 1 / Math.pow(1 + discRate, yr + 0.5);
+    const capex = (yr < schedule.length ? schedule[yr] : 0) * dcCost;
+
+    totalUndisc += orri;
+    totalPV += orri * pvFactor;
+    totalOil += yearOil;
+    totalCapex += capex;
+
+    if (yr < 10) {
+      annualOrri.push(Math.round(orri));
+      annualOil.push(Math.round(yearOil));
+    }
+  }
+
+  // Update results
+  document.getElementById('r-undisc').textContent = '$' + Math.round(totalUndisc).toLocaleString();
+  document.getElementById('r-pv10').textContent = '$' + Math.round(totalPV).toLocaleString();
+  document.getElementById('r-annual').textContent = '$' + Math.round(totalUndisc / prodYears).toLocaleString() + '/yr';
+  document.getElementById('r-oil').textContent = Math.round(totalOil).toLocaleString() + ' BBL';
+  document.getElementById('r-capex').textContent = '$' + Math.round(totalCapex).toLocaleString();
+
+  // Update bar chart
+  cfChart.data.labels = annualOrri.map((_, i) => `Yr ${i + 1}`);
+  cfChart.data.datasets[0].data = annualOrri;
+  cfChart.update('none');
+
+  // Update schedule table
+  const tbody = document.getElementById('sched-body');
+  tbody.innerHTML = '';
+  let cum = 0;
+  for (let i = 0; i < Math.min(schedule.length, 10); i++) {
+    cum += schedule[i];
+    // Also show production years beyond drilling
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i + 1}</td><td>${schedule[i]}</td><td>${cum}</td><td>${annualOil[i]?.toLocaleString() || '—'}</td><td>$${annualOrri[i]?.toLocaleString() || '—'}</td><td>$${Math.round(annualOrri[i] / Math.pow(1 + discRate, i + 0.5))?.toLocaleString() || '—'}</td>`;
+    tbody.appendChild(tr);
+  }
+  // Show remaining production years if drilling < 10
+  for (let i = schedule.length; i < 10; i++) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${i + 1}</td><td>0</td><td>${cum}</td><td>${annualOil[i]?.toLocaleString() || '—'}</td><td>$${annualOrri[i]?.toLocaleString() || '—'}</td><td>$${Math.round(annualOrri[i] / Math.pow(1 + discRate, i + 0.5))?.toLocaleString() || '—'}</td>`;
+    tbody.appendChild(tr);
+  }
+
+  // Update planned wells on map
+  updatePlannedWells(totalWells);
+  if (document.getElementById('t-planned').checked) plannedMarkers.addTo(map);
+}
+
+// Bind all sliders
+document.querySelectorAll('input[type=range]').forEach(el => {
+  el.addEventListener('input', recalc);
+});
+
+// Initial calc
+recalc();
+
+// Fit map to show both wells and AOI
+const allBounds = L.latLngBounds(AOI_COORDS);
+WELLS.forEach(w => { if (w.Latitude && w.Longitude) allBounds.extend([w.Latitude, w.Longitude]); });
+map.fitBounds(allBounds.pad(0.1));
+</script>
+</body>
+</html>

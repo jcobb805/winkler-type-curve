@@ -178,7 +178,22 @@ const satBase = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/service
   attribution: '&copy; Esri', maxZoom: 19
 });
 darkBase.addTo(map);
-L.control.layers({ 'Dark': darkBase, 'Topo': topoBase, 'Satellite': satBase }, null, { position: 'topright' }).addTo(map);
+
+// Texas GLO Abstract/Survey boundaries (same block grid as DrillingInfo)
+const txAbstracts = L.tileLayer.wms('https://gis.glo.texas.gov/arcgis/services/Boundaries/GLO_Boundaries/MapServer/WMSServer', {
+  layers: '0', format: 'image/png', transparent: true, opacity: 0.6, attribution: 'TX GLO'
+});
+
+// Texas RRC well spots overlay
+const txWells = L.tileLayer.wms('https://gis.rrc.texas.gov/arcgis/services/GIS_Services/RRC_Map_Services/MapServer/WMSServer', {
+  layers: '0,1,2', format: 'image/png', transparent: true, opacity: 0.5, attribution: 'TX RRC'
+});
+
+L.control.layers(
+  { 'Dark': darkBase, 'Topo': topoBase, 'Satellite': satBase },
+  { 'TX Survey Blocks (GLO)': txAbstracts, 'TX RRC Wells': txWells },
+  { position: 'topright', collapsed: false }
+).addTo(map);
 
 // AOI — render each section from shapefile with popup
 const aoiLayer = L.geoJSON(HALLEY_GEOJSON, {
